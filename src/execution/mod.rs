@@ -1,4 +1,5 @@
 use crate::{data::MarketMeta, portfolio::OrderEvent, strategy::Decision};
+use barter_data::event::{DataKind, MarketEvent};
 use barter_integration::model::{instrument::Instrument, Exchange};
 use chrono::{DateTime, Utc};
 use error::ExecutionError;
@@ -12,8 +13,10 @@ pub mod simulated;
 
 /// Generates a result [`FillEvent`] by executing an [`OrderEvent`].
 pub trait ExecutionClient {
-    /// Return a [`FillEvent`] from executing the input [`OrderEvent`].
-    fn generate_fill(&self, order: &OrderEvent) -> Result<FillEvent, ExecutionError>;
+    /// Submits an [`OrderEvent`] to the execution engine
+    fn add_order(&mut self, order: &OrderEvent);
+    /// Generates [`FillEvent`] using the input [`MarketEvent<DataKind>`]
+    fn generate_fill(&mut self, market: &MarketEvent<DataKind>) -> Vec<FillEvent>;
 }
 
 /// Fills are journals of work done by an Execution handler. These are sent back to the portfolio

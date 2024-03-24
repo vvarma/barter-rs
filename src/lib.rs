@@ -157,7 +157,9 @@
 //!
 //! let order_event = test_util::order_event();
 //!
-//! let fill_event = execution.generate_fill(&order_event);
+//! execution.add_order(&order_event);
+//! let market_event = test_util::market_event_candle();
+//! let fills = execution.generate_fill(&market_event);
 //! ```
 //!
 //! ### Statistic

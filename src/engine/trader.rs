@@ -164,6 +164,10 @@ where
             while let Some(event) = self.event_q.pop_front() {
                 match event {
                     Event::Market(market) => {
+                        for fill in self.execution.generate_fill(&market) {
+                            self.event_tx.send(Event::Fill(fill.clone()));
+                            self.event_q.push_back(Event::Fill(fill));
+                        }
                         if let Some(signal) = self.strategy.generate_signal(&market) {
                             self.event_tx.send(Event::Signal(signal.clone()));
                             self.event_q.push_back(Event::Signal(signal));
@@ -204,13 +208,7 @@ where
                     }
 
                     Event::OrderNew(order) => {
-                        let fill = self
-                            .execution
-                            .generate_fill(&order)
-                            .expect("failed to generate Fill");
-
-                        self.event_tx.send(Event::Fill(fill.clone()));
-                        self.event_q.push_back(Event::Fill(fill));
+                        self.execution.add_order(&order);
                     }
 
                     Event::Fill(fill) => {
