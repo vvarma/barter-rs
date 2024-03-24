@@ -92,11 +92,11 @@ impl OrderEvent {
 }
 
 /// Type of order the portfolio wants the execution::handler to place.
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Deserialize, Serialize)]
 pub enum OrderType {
     Market,
-    Limit,
-    Bracket,
+    Limit { price: f64, expiry: DateTime<Utc> },
+    //Bracket,
 }
 
 impl Default for OrderType {

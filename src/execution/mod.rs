@@ -16,9 +16,14 @@ pub trait ExecutionClient {
     /// Submits an [`OrderEvent`] to the execution engine
     fn add_order(&mut self, order: &OrderEvent);
     /// Generates [`FillEvent`] using the input [`MarketEvent<DataKind>`]
-    fn generate_fill(&mut self, market: &MarketEvent<DataKind>) -> Vec<FillEvent>;
+    fn generate_fill(&mut self, market: &MarketEvent<DataKind>) -> Vec<FillOrExpire>;
 }
 
+#[derive(Debug)]
+pub enum FillOrExpire {
+    Fill(FillEvent),
+    Expire(OrderEvent),
+}
 /// Fills are journals of work done by an Execution handler. These are sent back to the portfolio
 /// so it can apply updates.
 #[derive(Clone, PartialEq, PartialOrd, Debug, Deserialize, Serialize)]

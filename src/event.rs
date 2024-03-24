@@ -28,6 +28,7 @@ pub enum Event {
     PositionUpdate(PositionUpdate),
     PositionExit(PositionExit),
     Balance(Balance),
+    ExpiredOrder(OrderEvent),
 }
 
 /// Message transmitter for sending Barter messages to downstream consumers.

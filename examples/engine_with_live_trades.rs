@@ -199,6 +199,9 @@ async fn listen_to_engine_events(mut event_rx: mpsc::UnboundedReceiver<Event>) {
                 // Balance update Event occurred in Engine
                 println!("{balance_update:?}");
             }
+            Event::ExpiredOrder(expired_order) => {
+                println!("{expired_order:?}")
+            }
         }
     }
 }

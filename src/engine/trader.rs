@@ -2,7 +2,7 @@ use super::{error::EngineError, Command};
 use crate::{
     data::{Feed, MarketGenerator},
     event::{Event, MessageTransmitter},
-    execution::ExecutionClient,
+    execution::{ExecutionClient, FillOrExpire},
     portfolio::{FillUpdater, MarketUpdater, OrderGenerator},
     strategy::{SignalForceExit, SignalGenerator},
 };
@@ -165,8 +165,16 @@ where
                 match event {
                     Event::Market(market) => {
                         for fill in self.execution.generate_fill(&market) {
-                            self.event_tx.send(Event::Fill(fill.clone()));
-                            self.event_q.push_back(Event::Fill(fill));
+                            match fill {
+                                FillOrExpire::Fill(fill) => {
+                                    self.event_tx.send(Event::Fill(fill.clone()));
+                                    self.event_q.push_back(Event::Fill(fill));
+                                }
+                                FillOrExpire::Expire(order) => {
+                                    self.event_tx.send(Event::ExpiredOrder(order.clone()));
+                                    self.event_q.push_back(Event::ExpiredOrder(order));
+                                }
+                            }
                         }
                         if let Some(signal) = self.strategy.generate_signal(&market) {
                             self.event_tx.send(Event::Signal(signal.clone()));
