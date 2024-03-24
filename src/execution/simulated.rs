@@ -44,36 +44,40 @@ impl ExecutionClient for SimulatedExecution {
     }
 
     fn generate_fill(&mut self, market: &MarketEvent<DataKind>) -> Vec<FillEvent> {
-        let rel_orders =
-            self.pending_orders.iter().enumerate().filter(|(_i, o)| {
+        if let DataKind::Candle(candle) = &market.kind {
+            let rel_orders = self.pending_orders.iter().enumerate().filter(|(_i, o)| {
                 o.exchange == market.exchange && o.instrument == market.instrument
             });
-        let market_orders: Vec<(usize, FillEvent)> = rel_orders
-            .filter(|(_i, o)| o.order_type == OrderType::Market)
-            .map(|(i, o)| {
-                let fill_value_gross = SimulatedExecution::calculate_fill_value_gross(o);
-                (
-                    i,
-                    FillEvent {
-                        time: Utc::now(),
-                        exchange: o.exchange.clone(),
-                        instrument: o.instrument.clone(),
-                        market_meta: o.market_meta,
-                        decision: o.decision,
-                        quantity: o.quantity,
-                        fill_value_gross,
-                        fees: self.calculate_fees(&fill_value_gross),
-                    },
-                )
-            })
-            .collect();
-        market_orders
-            .into_iter()
-            .map(|(i, o)| {
-                self.pending_orders.remove(i);
-                o
-            })
-            .collect()
+            let market_orders: Vec<(usize, FillEvent)> = rel_orders
+                .filter(|(_i, o)| o.order_type == OrderType::Market)
+                .map(|(i, o)| {
+                    let midpoint = (candle.open + candle.close) / 2.0;
+                    let fill_value_gross = midpoint * o.quantity.abs();
+                    (
+                        i,
+                        FillEvent {
+                            time: Utc::now(),
+                            exchange: o.exchange.clone(),
+                            instrument: o.instrument.clone(),
+                            market_meta: o.market_meta,
+                            decision: o.decision,
+                            quantity: o.quantity,
+                            fill_value_gross,
+                            fees: self.calculate_fees(&fill_value_gross),
+                        },
+                    )
+                })
+                .collect();
+            market_orders
+                .into_iter()
+                .map(|(i, o)| {
+                    self.pending_orders.remove(i);
+                    o
+                })
+                .collect()
+        } else {
+            vec![]
+        }
     }
 }
 
