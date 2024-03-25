@@ -96,7 +96,9 @@ impl OrderEvent {
 pub enum OrderType {
     Market,
     Limit { price: f64, expiry: DateTime<Utc> },
-    //Bracket,
+    Stop { stop_loss: f64 },
+    TakeProfit { take_profit: f64 },
+    StopOrProfit { stop_loss: f64, take_profit: f64 },
 }
 
 impl Default for OrderType {

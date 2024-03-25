@@ -51,6 +51,19 @@ impl ExecutionClient for SimulatedExecution {
                                 .map(|fill_event| (i, Some(fill_event)))
                         }
                     }
+                    OrderType::StopOrProfit {
+                        stop_loss,
+                        take_profit,
+                    } => self
+                        .fill_stop_order(o, candle, stop_loss)
+                        .or_else(|| self.fill_limit_order(o, candle, take_profit))
+                        .map(|f| (i, Some(f))),
+                    OrderType::Stop { stop_loss } => self
+                        .fill_stop_order(o, candle, stop_loss)
+                        .map(|f| (i, Some(f))),
+                    OrderType::TakeProfit { take_profit } => self
+                        .fill_limit_order(o, candle, take_profit)
+                        .map(|f| (i, Some(f))),
                 })
                 .collect();
             exp_or_fills
@@ -77,9 +90,7 @@ impl SimulatedExecution {
             pending_orders: vec![],
         }
     }
-    /// Fills an [`OrderEvent`] based on [`Candle`]'s midpoint price
-    fn fill_market_order(&self, o: &OrderEvent, candle: &Candle) -> FillEvent {
-        let midpoint = (candle.open + candle.close) / 2.0;
+    fn fill_order_at_midpoint(&self, o: &OrderEvent, midpoint: f64) -> FillEvent {
         let fill_value_gross = midpoint * o.quantity.abs();
         FillEvent {
             time: Utc::now(),
@@ -91,6 +102,11 @@ impl SimulatedExecution {
             fill_value_gross,
             fees: self.calculate_fees(&fill_value_gross),
         }
+    }
+    /// Fills an [`OrderEvent`] based on [`Candle`]'s midpoint price
+    fn fill_market_order(&self, o: &OrderEvent, candle: &Candle) -> FillEvent {
+        let midpoint = (candle.open + candle.close) / 2.0;
+        self.fill_order_at_midpoint(o, midpoint)
     }
 
     /// Fills an [`OrderEvent`] if [`Candle`]'s price matches the limit_price
@@ -109,19 +125,26 @@ impl SimulatedExecution {
         } else {
             None
         }
-        .map(|midpoint| {
-            let fill_value_gross = midpoint * o.quantity.abs();
-            FillEvent {
-                time: Utc::now(),
-                exchange: o.exchange.clone(),
-                instrument: o.instrument.clone(),
-                market_meta: o.market_meta,
-                decision: o.decision,
-                quantity: o.quantity,
-                fill_value_gross,
-                fees: self.calculate_fees(&fill_value_gross),
-            }
-        })
+        .map(|midpoint| self.fill_order_at_midpoint(o, midpoint))
+    }
+
+    fn fill_stop_order(
+        &self,
+        o: &OrderEvent,
+        candle: &Candle,
+        stop_price: f64,
+    ) -> Option<FillEvent> {
+        let candle_min = candle.open.min(candle.close);
+        let candle_max = candle.open.max(candle.close);
+        // CloseLong
+        if o.quantity < 0.0 && candle_min < stop_price {
+            Some(candle_min + candle_max.min(stop_price))
+        } else if o.quantity > 0.0 && candle_max > stop_price {
+            Some(candle_max + candle_min.max(stop_price))
+        } else {
+            None
+        }
+        .map(|midpoint| self.fill_order_at_midpoint(o, midpoint))
     }
 
     /// Calculates the simulated [`Fees`] a [`FillEvent`] will incur, based on the input [`OrderEvent`].
