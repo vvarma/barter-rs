@@ -177,10 +177,6 @@ impl PositionExiter for Position {
         mut balance: Balance,
         fill: &FillEvent,
     ) -> Result<PositionExit, PortfolioError> {
-        if fill.decision.is_entry() {
-            return Err(PortfolioError::CannotExitPositionWithEntryFill);
-        }
-
         // Exit fees
         self.exit_fees = fill.fees;
         self.exit_fees_total = fill.fees.calculate_total_fees();
@@ -217,8 +213,8 @@ impl Position {
     /// Determine the [`Position`] entry [`Side`] by analysing the input [`FillEvent`].
     pub fn parse_entry_side(fill: &FillEvent) -> Result<Side, PortfolioError> {
         match fill.decision {
-            Decision::Long if fill.quantity.is_sign_positive() => Ok(Side::Buy),
-            Decision::Short if fill.quantity.is_sign_negative() => Ok(Side::Sell),
+            Decision::Long(_) if fill.quantity.is_sign_positive() => Ok(Side::Buy),
+            Decision::Short(_) if fill.quantity.is_sign_negative() => Ok(Side::Sell),
             Decision::CloseLong | Decision::CloseShort => {
                 Err(PortfolioError::CannotEnterPositionWithExitFill)
             }
@@ -579,7 +575,7 @@ mod tests {
     #[test]
     fn enter_new_position_with_long_decision_provided() {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Long;
+        input_fill.decision = Decision::Long(Default::default());
         input_fill.quantity = 1.0;
         input_fill.fill_value_gross = 100.0;
         input_fill.fees = Fees {
@@ -616,7 +612,7 @@ mod tests {
     #[test]
     fn enter_new_position_with_short_decision_provided() {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Short;
+        input_fill.decision = Decision::Short(Default::default());
         input_fill.quantity = -1.0;
         input_fill.fill_value_gross = 100.0;
         input_fill.fees = Fees {
@@ -697,7 +693,7 @@ mod tests {
     fn enter_new_position_and_return_err_with_negative_quantity_long_decision_provided(
     ) -> Result<(), String> {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Long;
+        input_fill.decision = Decision::Long(Default::default());
         input_fill.quantity = -1.0;
         input_fill.fill_value_gross = 100.0;
         input_fill.fees = Fees {
@@ -719,7 +715,7 @@ mod tests {
     fn enter_new_position_and_return_err_with_positive_quantity_short_decision_provided(
     ) -> Result<(), String> {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Short;
+        input_fill.decision = Decision::Short(Default::default());
         input_fill.quantity = 1.0;
         input_fill.fill_value_gross = 100.0;
         input_fill.fees = Fees {
@@ -1275,7 +1271,7 @@ mod tests {
 
         // Input FillEvent
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Long;
+        input_fill.decision = Decision::Long(Default::default());
         input_fill.quantity = position.quantity;
         input_fill.fill_value_gross = 200.0;
         input_fill.fees = Fees {
@@ -1321,7 +1317,7 @@ mod tests {
 
         // Input FillEvent
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Short;
+        input_fill.decision = Decision::Short(Default::default());
         input_fill.quantity = -position.quantity;
         input_fill.fill_value_gross = 200.0;
         input_fill.fees = Fees {
@@ -1365,7 +1361,7 @@ mod tests {
     #[test]
     fn parse_entry_side_as_long_with_positive_quantity_long_decision_provided() {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Long;
+        input_fill.decision = Decision::Long(Default::default());
         input_fill.quantity = 1.0;
 
         let actual = Position::parse_entry_side(&input_fill).unwrap();
@@ -1376,7 +1372,7 @@ mod tests {
     #[test]
     fn parse_entry_side_as_short_with_negative_quantity_short_decision_provided() {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Short;
+        input_fill.decision = Decision::Short(Default::default());
         input_fill.quantity = -1.0;
 
         let actual = Position::parse_entry_side(&input_fill).unwrap();
@@ -1418,7 +1414,7 @@ mod tests {
     fn parse_entry_side_and_return_err_with_negative_quantity_long_decision_provided(
     ) -> Result<(), String> {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Long;
+        input_fill.decision = Decision::Long(Default::default());
         input_fill.quantity = -1.0;
 
         if let Err(_) = Position::parse_entry_side(&input_fill) {
@@ -1434,7 +1430,7 @@ mod tests {
     fn parse_entry_side_and_return_err_with_positive_quantity_short_decision_provided(
     ) -> Result<(), String> {
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Short;
+        input_fill.decision = Decision::Short(Default::default());
         input_fill.quantity = 1.0;
 
         if let Err(_) = Position::parse_entry_side(&input_fill) {

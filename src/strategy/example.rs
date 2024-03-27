@@ -1,9 +1,8 @@
-use super::{Decision, Signal, SignalGenerator, SignalStrength};
+use super::{Decision, ExecutionStrategy, Signal, SignalGenerator, SignalStrength};
 use crate::data::MarketMeta;
 use barter_data::event::{DataKind, MarketEvent};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use ta::{indicators::RelativeStrengthIndex, Next};
 
 /// Configuration for constructing a [`RSIStrategy`] via the new() constructor method.
@@ -30,7 +29,7 @@ impl SignalGenerator for RSIStrategy {
         let rsi = self.rsi.next(candle_close);
 
         // Generate advisory signals map
-        let signals = RSIStrategy::generate_signals_map(rsi);
+        let signals = RSIStrategy::generate_signals(rsi);
 
         // If signals map is empty, return no SignalEvent
         if signals.is_empty() {
@@ -61,25 +60,31 @@ impl RSIStrategy {
 
     /// Given the latest RSI value for a symbol, generates a map containing the [`SignalStrength`] for
     /// [`Decision`] under consideration.
-    fn generate_signals_map(rsi: f64) -> HashMap<Decision, SignalStrength> {
-        let mut signals = HashMap::with_capacity(4);
+    fn generate_signals(rsi: f64) -> Vec<(Decision, SignalStrength)> {
+        let mut signals = vec![];
         if rsi < 40.0 {
-            signals.insert(Decision::Long, RSIStrategy::calculate_signal_strength());
+            signals.push((
+                Decision::Long(ExecutionStrategy::new()),
+                RSIStrategy::calculate_signal_strength(),
+            ));
         }
         if rsi > 60.0 {
-            signals.insert(
+            signals.push((
                 Decision::CloseLong,
                 RSIStrategy::calculate_signal_strength(),
-            );
+            ));
         }
         if rsi > 60.0 {
-            signals.insert(Decision::Short, RSIStrategy::calculate_signal_strength());
+            signals.push((
+                Decision::Short(ExecutionStrategy::new()),
+                RSIStrategy::calculate_signal_strength(),
+            ));
         }
         if rsi < 40.0 {
-            signals.insert(
+            signals.push((
                 Decision::CloseShort,
                 RSIStrategy::calculate_signal_strength(),
-            );
+            ));
         }
         signals
     }

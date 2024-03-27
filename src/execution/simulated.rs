@@ -1,6 +1,6 @@
 use barter_data::{
     event::{DataKind, MarketEvent},
-    subscription::candle::{self, Candle},
+    subscription::candle::Candle,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};

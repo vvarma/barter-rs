@@ -20,11 +20,10 @@ pub struct DefaultRisk {}
 impl OrderEvaluator for DefaultRisk {
     const DEFAULT_ORDER_TYPE: OrderType = OrderType::Market;
 
-    fn evaluate_order(&self, mut order: OrderEvent) -> Option<OrderEvent> {
+    fn evaluate_order(&self, order: OrderEvent) -> Option<OrderEvent> {
         if self.risk_too_high(&order) {
             return None;
         }
-        order.order_type = DefaultRisk::DEFAULT_ORDER_TYPE;
         Some(order)
     }
 }

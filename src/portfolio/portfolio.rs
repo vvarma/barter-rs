@@ -2,25 +2,25 @@ use super::{
     allocator::OrderAllocator,
     error::PortfolioError,
     position::{
-        determine_position_id, Position, PositionEnterer, PositionExiter, PositionId,
+        self, determine_position_id, Position, PositionEnterer, PositionExiter, PositionId,
         PositionUpdate, PositionUpdater,
     },
     repository::{error::RepositoryError, BalanceHandler, PositionHandler, StatisticHandler},
     risk::OrderEvaluator,
-    Balance, FillUpdater, MarketUpdater, OrderEvent, OrderGenerator, OrderType,
+    Balance, FillUpdater, MarketUpdater, OrderEvent, OrderEventBuilder, OrderGenerator, OrderType,
 };
 use crate::{
     data::MarketMeta,
     event::Event,
     execution::FillEvent,
     statistic::summary::{Initialiser, PositionSummariser},
-    strategy::{Decision, Signal, SignalForceExit, SignalStrength},
+    strategy::{Decision, EntryType, Signal, SignalForceExit, SignalStrength},
 };
 use barter_data::event::{DataKind, MarketEvent};
 use barter_integration::model::{Market, MarketId, Side};
 use chrono::Utc;
 use serde::Serialize;
-use std::{collections::HashMap, marker::PhantomData};
+use std::marker::PhantomData;
 use tracing::info;
 use uuid::Uuid;
 
@@ -132,6 +132,18 @@ where
                 None => return Ok(None),
                 Some(net_signal) => net_signal,
             };
+        let order_type = match &signal_decision {
+            Decision::Long(es) => match es.entry_type {
+                EntryType::Market => OrderType::Market,
+                EntryType::Limit { price, expiry } => OrderType::Limit { price, expiry },
+            },
+            Decision::CloseLong => OrderType::Market,
+            Decision::Short(es) => match es.entry_type {
+                EntryType::Market => OrderType::Market,
+                EntryType::Limit { price, expiry } => OrderType::Limit { price, expiry },
+            },
+            Decision::CloseShort => OrderType::Market,
+        };
 
         // Construct mutable OrderEvent that can be modified by Allocation & Risk management
         let mut order = OrderEvent {
@@ -141,7 +153,7 @@ where
             market_meta: signal.market_meta,
             decision: *signal_decision,
             quantity: 0.0,
-            order_type: OrderType::default(),
+            order_type,
         };
 
         // Manage OrderEvent size allocation
@@ -244,7 +256,18 @@ where
                 balance.available += -position.enter_value_gross - position.enter_fees_total;
 
                 // Add to current Positions in Repository
-                self.repository.set_open_position(position)?;
+                self.repository.set_open_position(position.clone())?;
+                if let Some(ot) = parse_exit_order_type(&fill.decision) {
+                    generated_events.push(Event::OrderNew(OrderEvent {
+                        time: Utc::now(),
+                        exchange: fill.exchange.clone(),
+                        instrument: fill.instrument.clone(),
+                        market_meta: fill.market_meta.clone(),
+                        decision: fill.decision.clone(),
+                        quantity: -position.quantity,
+                        order_type: ot,
+                    }))
+                }
             }
         };
 
@@ -518,17 +541,37 @@ where
     }
 }
 
+fn parse_exit_order_type(decision: &Decision) -> Option<OrderType> {
+    let es = match decision {
+        Decision::Long(es) => Some(es),
+        Decision::Short(es) => Some(es),
+        _ => None,
+    };
+    match es {
+        Some(es) => match (es.stop_loss, es.take_profit) {
+            (None, None) => None,
+            (None, Some(tp)) => Some(OrderType::TakeProfit { take_profit: tp }),
+            (Some(sl), None) => Some(OrderType::Stop { stop_loss: sl }),
+            (Some(sl), Some(tp)) => Some(OrderType::StopOrProfit {
+                stop_loss: sl,
+                take_profit: tp,
+            }),
+        },
+        None => None,
+    }
+}
+
 /// Parses an incoming [`Signal`]'s signals map. Determines what the net signal [`Decision`]
 /// will be, and it's associated [`SignalStrength`].
 pub fn parse_signal_decisions<'a>(
     position: &'a Option<&Position>,
-    signals: &'a HashMap<Decision, SignalStrength>,
-) -> Option<(&'a Decision, &'a SignalStrength)> {
+    signals: &'a [(Decision, SignalStrength)],
+) -> Option<&'a (Decision, SignalStrength)> {
     // Determine the presence of signals in the provided signals HashMap
-    let signal_close_long = signals.get_key_value(&Decision::CloseLong);
-    let signal_long = signals.get_key_value(&Decision::Long);
-    let signal_close_short = signals.get_key_value(&Decision::CloseShort);
-    let signal_short = signals.get_key_value(&Decision::Short);
+    let signal_long = signals.iter().find(|(d, _s)| d.is_long() && d.is_entry());
+    let signal_close_long = signals.iter().find(|(d, _s)| d == &Decision::CloseLong);
+    let signal_short = signals.iter().find(|(d, _s)| d.is_short() && d.is_entry());
+    let signal_close_short = signals.iter().find(|(d, _s)| d == &Decision::CloseShort);
 
     // If an existing Position exists, check for net close signals
     if let Some(position) = position {
@@ -973,11 +1016,11 @@ pub mod tests {
         let mut input_signal = signal();
         input_signal
             .signals
-            .insert(Decision::Long, SignalStrength(1.0));
+            .push((Decision::Long(Default::default()), SignalStrength(1.0)));
 
         let actual = portfolio.generate_order(&input_signal).unwrap().unwrap();
 
-        assert_eq!(actual.decision, Decision::Long)
+        assert_eq!(actual.decision, Decision::Long(Default::default()))
     }
 
     #[test]
@@ -999,11 +1042,11 @@ pub mod tests {
 
         input_signal
             .signals
-            .insert(Decision::Short, SignalStrength(1.0));
+            .push((Decision::Short(Default::default()), SignalStrength(1.0)));
 
         let actual = portfolio.generate_order(&input_signal).unwrap().unwrap();
 
-        assert_eq!(actual.decision, Decision::Short)
+        assert_eq!(actual.decision, Decision::Short(Default::default()))
     }
 
     #[test]
@@ -1031,7 +1074,7 @@ pub mod tests {
 
         input_signal
             .signals
-            .insert(Decision::CloseLong, SignalStrength(1.0));
+            .push((Decision::CloseLong, SignalStrength(1.0)));
 
         let actual = portfolio.generate_order(&input_signal).unwrap().unwrap();
 
@@ -1063,7 +1106,7 @@ pub mod tests {
 
         input_signal
             .signals
-            .insert(Decision::CloseShort, SignalStrength(1.0));
+            .push((Decision::CloseShort, SignalStrength(1.0)));
 
         let actual = portfolio.generate_order(&input_signal).unwrap().unwrap();
 
@@ -1159,7 +1202,7 @@ pub mod tests {
 
         // Input FillEvent
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Long;
+        input_fill.decision = Decision::Long(Default::default());
         input_fill.quantity = 1.0;
         input_fill.fill_value_gross = 100.0;
         input_fill.fees = Fees {
@@ -1198,7 +1241,7 @@ pub mod tests {
 
         // Input FillEvent
         let mut input_fill = fill_event();
-        input_fill.decision = Decision::Short;
+        input_fill.decision = Decision::Short(Default::default());
         input_fill.quantity = -1.0;
         input_fill.fill_value_gross = 100.0;
         input_fill.fees = Fees {
@@ -1440,13 +1483,14 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::CloseLong, SignalStrength(1.0));
-        signals.insert(Decision::Short, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::CloseLong, SignalStrength(1.0)),
+            (Decision::Short(Default::default()), SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
-        assert_eq!(actual.unwrap().0, &Decision::CloseLong);
+        assert_eq!(actual.unwrap().0, Decision::CloseLong);
     }
 
     #[test]
@@ -1458,9 +1502,10 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::Long, SignalStrength(1.0));
-        signals.insert(Decision::CloseShort, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::Long(Default::default()), SignalStrength(1.0)),
+            (Decision::CloseShort, SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
@@ -1476,15 +1521,16 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::CloseLong, SignalStrength(1.0));
-        signals.insert(Decision::CloseShort, SignalStrength(1.0));
-        signals.insert(Decision::Short, SignalStrength(1.0));
-        signals.insert(Decision::Long, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::CloseLong, SignalStrength(1.0)),
+            (Decision::CloseShort, SignalStrength(1.0)),
+            (Decision::Short(Default::default()), SignalStrength(1.0)),
+            (Decision::Long(Default::default()), SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
-        assert_eq!(actual.unwrap().0, &Decision::CloseLong);
+        assert_eq!(actual.unwrap().0, Decision::CloseLong);
     }
 
     #[test]
@@ -1496,13 +1542,14 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::CloseShort, SignalStrength(1.0));
-        signals.insert(Decision::Long, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::CloseShort, SignalStrength(1.0)),
+            (Decision::Long(Default::default()), SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
-        assert_eq!(actual.unwrap().0, &Decision::CloseShort);
+        assert_eq!(actual.unwrap().0, Decision::CloseShort);
     }
 
     #[test]
@@ -1514,9 +1561,10 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::CloseLong, SignalStrength(1.0));
-        signals.insert(Decision::Short, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::CloseLong, SignalStrength(1.0)),
+            (Decision::Short(Default::default()), SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
@@ -1532,15 +1580,16 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::CloseShort, SignalStrength(1.0));
-        signals.insert(Decision::CloseLong, SignalStrength(1.0));
-        signals.insert(Decision::Short, SignalStrength(1.0));
-        signals.insert(Decision::Long, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::CloseShort, SignalStrength(1.0)),
+            (Decision::CloseLong, SignalStrength(1.0)),
+            (Decision::Short(Default::default()), SignalStrength(1.0)),
+            (Decision::Long(Default::default()), SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
-        assert_eq!(actual.unwrap().0, &Decision::CloseShort);
+        assert_eq!(actual.unwrap().0, Decision::CloseShort);
     }
 
     #[test]
@@ -1549,13 +1598,14 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::Long, SignalStrength(1.0));
-        signals.insert(Decision::CloseShort, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::Long(Default::default()), SignalStrength(1.0)),
+            (Decision::CloseShort, SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
-        assert_eq!(actual.unwrap().0, &Decision::Long);
+        assert_eq!(actual.unwrap().0, Decision::Long(Default::default()));
     }
 
     #[test]
@@ -1564,13 +1614,14 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::Short, SignalStrength(1.0));
-        signals.insert(Decision::CloseLong, SignalStrength(1.0));
+        let signals = vec![
+            (Decision::Short(Default::default()), SignalStrength(1.0)),
+            (Decision::CloseLong, SignalStrength(1.0)),
+        ];
 
         let actual = parse_signal_decisions(&position, &signals);
 
-        assert_eq!(actual.unwrap().0, &Decision::Short);
+        assert_eq!(actual.unwrap().0, Decision::Short(Default::default()));
     }
 
     #[test]
@@ -1579,12 +1630,12 @@ pub mod tests {
         let position = position.as_ref();
 
         // Signals HashMap
-        let mut signals = HashMap::with_capacity(4);
-        signals.insert(Decision::Long, SignalStrength(1.0));
-        signals.insert(Decision::CloseShort, SignalStrength(1.0));
-        signals.insert(Decision::Short, SignalStrength(1.0));
-        signals.insert(Decision::CloseLong, SignalStrength(1.0));
-
+        let signals = vec![
+            (Decision::Long(Default::default()), SignalStrength(1.0)),
+            (Decision::CloseShort, SignalStrength(1.0)),
+            (Decision::Short(Default::default()), SignalStrength(1.0)),
+            (Decision::CloseLong, SignalStrength(1.0)),
+        ];
         let actual = parse_signal_decisions(&position, &signals);
 
         assert_eq!(actual, None);

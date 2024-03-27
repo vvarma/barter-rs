@@ -13,9 +13,6 @@ pub enum PortfolioError {
     #[error("Cannot exit Position with an entry decision FillEvent.")]
     CannotEnterPositionWithExitFill,
 
-    #[error("Cannot exit Position with an entry decision FillEvent.")]
-    CannotExitPositionWithEntryFill,
-
     #[error("Cannot generate PositionExit from Position that has not been exited")]
     PositionExit,
 

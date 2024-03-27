@@ -225,7 +225,8 @@ where
                             .lock()
                             .update_from_fill(&fill)
                             .expect("failed to update Portfolio from fill");
-
+                        self.event_q
+                            .extend(fill_side_effect_events.clone().into_iter());
                         self.event_tx.send_many(fill_side_effect_events);
                     }
                     _ => {}

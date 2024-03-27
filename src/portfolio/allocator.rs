@@ -1,6 +1,6 @@
 use crate::{
     portfolio::{position::Position, OrderEvent},
-    strategy::{Decision, SignalStrength},
+    strategy::{Decision, EntryType, SignalStrength},
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,16 +34,30 @@ impl OrderAllocator for DefaultAllocator {
         let default_order_size = self.default_order_value / order.market_meta.close;
         let default_order_size = (default_order_size * 10000.0).floor() / 10000.0;
 
-        match order.decision {
+        order.quantity = match order.decision {
             // Entry
-            Decision::Long => order.quantity = default_order_size * signal_strength.0,
+            Decision::Long(es) => match es.entry_type {
+                EntryType::Market => default_order_size * signal_strength.0,
+                EntryType::Limit { price, expiry: _ } => {
+                    let order_size = self.default_order_value / price;
+                    let order_size = (order_size * 10000.0).floor() / 10000.0;
+                    order_size * signal_strength.0
+                }
+            },
 
             // Entry
-            Decision::Short => order.quantity = -default_order_size * signal_strength.0,
+            Decision::Short(es) => match es.entry_type {
+                EntryType::Market => -default_order_size * signal_strength.0,
+                EntryType::Limit { price, expiry: _ } => {
+                    let order_size = self.default_order_value / price;
+                    let order_size = (order_size * 10000.0).floor() / 10000.0;
+                    -order_size * signal_strength.0
+                }
+            },
 
             // Exit
-            _ => order.quantity = 0.0 - position.as_ref().unwrap().quantity,
-        }
+            _ => 0.0 - position.as_ref().unwrap().quantity,
+        };
     }
 }
 
@@ -114,7 +128,7 @@ mod tests {
         let order_close = 10.0;
         let mut input_order = order_event();
         input_order.market_meta.close = order_close;
-        input_order.decision = Decision::Long;
+        input_order.decision = Decision::Long(Default::default());
 
         let input_signal_strength = SignalStrength(1.0);
 
@@ -136,7 +150,7 @@ mod tests {
         let order_close = 226.753403;
         let mut input_order = order_event();
         input_order.market_meta.close = order_close;
-        input_order.decision = Decision::Long;
+        input_order.decision = Decision::Long(Default::default());
 
         let input_signal_strength = SignalStrength(1.0);
 
@@ -144,7 +158,7 @@ mod tests {
 
         let actual_result = input_order.quantity;
         let expected_order_size = ((default_order_value / order_close) * 10000.0).floor() / 10000.0;
-        let expected_result = expected_order_size * input_signal_strength.0 as f64;
+        let expected_result = expected_order_size * input_signal_strength.0;
 
         assert_ne!(actual_result, 0.0);
         assert_eq!(actual_result, expected_result)
@@ -160,14 +174,14 @@ mod tests {
         let order_close = 10.0;
         let mut input_order = order_event();
         input_order.market_meta.close = order_close;
-        input_order.decision = Decision::Short;
+        input_order.decision = Decision::Short(Default::default());
 
         let input_signal_strength = SignalStrength(1.0);
 
         allocator.allocate_order(&mut input_order, None, input_signal_strength);
 
         let actual_result = input_order.quantity;
-        let expected_result = -(default_order_value / order_close) * input_signal_strength.0 as f64;
+        let expected_result = -(default_order_value / order_close) * input_signal_strength.0;
 
         assert_eq!(actual_result, expected_result)
     }
@@ -182,7 +196,7 @@ mod tests {
         let order_close = 226.753403;
         let mut input_order = order_event();
         input_order.market_meta.close = order_close;
-        input_order.decision = Decision::Short;
+        input_order.decision = Decision::Short(Default::default());
 
         let input_signal_strength = SignalStrength(1.0);
 
