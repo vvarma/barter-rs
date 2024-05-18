@@ -138,9 +138,9 @@ impl SimulatedExecution {
         let candle_max = candle.open.max(candle.close);
         // CloseLong
         if o.quantity < 0.0 && candle_min < stop_price {
-            Some(candle_min + candle_max.min(stop_price))
+            Some((candle_min + candle_max.min(stop_price)) / 2.0)
         } else if o.quantity > 0.0 && candle_max > stop_price {
-            Some(candle_max + candle_min.max(stop_price))
+            Some((candle_max + candle_min.max(stop_price)) / 2.0)
         } else {
             None
         }

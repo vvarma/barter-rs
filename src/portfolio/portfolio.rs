@@ -262,8 +262,8 @@ where
                         time: Utc::now(),
                         exchange: fill.exchange.clone(),
                         instrument: fill.instrument.clone(),
-                        market_meta: fill.market_meta.clone(),
-                        decision: fill.decision.clone(),
+                        market_meta: fill.market_meta,
+                        decision: fill.decision,
                         quantity: -position.quantity,
                         order_type: ot,
                     }))
@@ -542,13 +542,8 @@ where
 }
 
 fn parse_exit_order_type(decision: &Decision) -> Option<OrderType> {
-    let es = match decision {
-        Decision::Long(es) => Some(es),
-        Decision::Short(es) => Some(es),
-        _ => None,
-    };
-    match es {
-        Some(es) => match (es.stop_loss, es.take_profit) {
+    match decision {
+        Decision::Long(es) | Decision::Short(es) => match (es.stop_loss, es.take_profit) {
             (None, None) => None,
             (None, Some(tp)) => Some(OrderType::TakeProfit { take_profit: tp }),
             (Some(sl), None) => Some(OrderType::Stop { stop_loss: sl }),
@@ -557,7 +552,7 @@ fn parse_exit_order_type(decision: &Decision) -> Option<OrderType> {
                 take_profit: tp,
             }),
         },
-        None => None,
+        _ => None,
     }
 }
 
