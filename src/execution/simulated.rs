@@ -29,6 +29,32 @@ pub struct SimulatedExecution {
 
 impl ExecutionClient for SimulatedExecution {
     fn add_order(&mut self, order: &OrderEvent) {
+        if order.order_type == OrderType::Market {
+            let lower_priority_orders: Vec<_> = self
+                .pending_orders
+                .iter()
+                .enumerate()
+                .filter(|(_idx, o)| {
+                    o.instrument == order.instrument
+                        && matches!(
+                            o.order_type,
+                            OrderType::Stop { stop_loss: _ }
+                                | OrderType::TakeProfit { take_profit: _ }
+                                | OrderType::StopOrProfit {
+                                    stop_loss: _,
+                                    take_profit: _,
+                                }
+                        )
+                })
+                .map(|p| p.0)
+                .collect();
+            for order in lower_priority_orders {
+                self.pending_orders.swap_remove(order);
+            }
+        }
+        for po in &self.pending_orders {
+            if po.instrument == order.instrument {}
+        }
         self.pending_orders.push(order.clone())
     }
 
